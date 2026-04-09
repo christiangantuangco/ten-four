@@ -250,7 +250,7 @@ fn list_mics() {
     println!();
     println!("To use a specific device, pass the source name to the daemon:");
     println!("  ten-four daemon --device <source-name>");
-    println!("  TEN_FOUR_DEVICE=<source-name> ten-four daemon");
+    println!("  DEVICE=<source-name> ten-four daemon");
 }
 
 /// Resolve a device string (friendly name or source name) to the actual pactl source name.

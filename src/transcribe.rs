@@ -146,7 +146,7 @@ impl TranscribeEngine for VoskTranscriber {
         recognizer.set_words(false);
 
         info!("Transcribing {} samples (vosk)...", samples.len());
-        recognizer.accept_waveform(&samples_i16);
+        let _ = recognizer.accept_waveform(&samples_i16);
         let result = recognizer.final_result().single().map(|r| r.text.to_string()).unwrap_or_default();
 
         let text = result.trim().to_string();

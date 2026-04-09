@@ -225,7 +225,8 @@ bind = CTRL, grave, exec, ten-four toggle
 
 # Vosk engine
 ./target/release/ten-four daemon --engine vosk \
-  --vosk-model ~/.local/share/ten-four/vosk-models/vosk-model-small-en-us-0.15
+  --vosk-model ~/.local/share/ten-four/vosk-models/vosk-model-small-en-us-0.15 \
+  --device "My Headset"
 
 # List available microphones
 ./target/release/ten-four list-mics
@@ -247,6 +248,7 @@ bind = CTRL, grave, exec, ten-four toggle
 | `--injector ydotool\|xdotool` | Text injection method (default: `ydotool`) |
 | `--socket PATH` | Unix socket path (default: `/tmp/ten-four.sock`) |
 | `TEN_FOUR_USE_GPU=1` | Enable GPU inference for Whisper (requires CUDA/Vulkan build) |
+| `YDOTOOL_SOCKET=PATH` | Override ydotoold socket path (default: `$XDG_RUNTIME_DIR/.ydotool_socket`) |
 | `RUST_LOG=ten_four=debug` | Verbose logging |
 
 ---
