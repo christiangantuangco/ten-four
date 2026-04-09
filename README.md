@@ -2,9 +2,8 @@
 
 Push-to-talk speech-to-text for Linux. Press a hotkey → speak → release → text appears at your cursor. Works in terminals, browsers, code editors, anywhere.
 
-- **Fully offline** — powered by [whisper.cpp](https://github.com/ggerganov/whisper.cpp) via [`whisper-rs`](https://github.com/tazz4843/whisper-rs)
+- **Fully offline** — powered by [whisper.cpp](https://github.com/ggerganov/whisper.cpp) or [Vosk](https://alphacephei.com/vosk/)
 - **Wayland + X11** — text injection via `ydotool` (Wayland-native) or `xdotool` (X11)
-- **Single binary** — no Python, no venvs, no runtime dependencies beyond `ydotool`
 - **aarch64 ready** — tested on Raspberry Pi (aarch64 Debian)
 
 ---
@@ -12,15 +11,15 @@ Push-to-talk speech-to-text for Linux. Press a hotkey → speak → release → 
 ## How It Works
 
 ```
-ten-four daemon   ← runs in background, owns audio + whisper model
+ten-four daemon   ← run this in a terminal, keeps running
 ten-four toggle   ← bind this to a hotkey in your DE
 ```
 
-The daemon listens on a Unix socket (`/tmp/ten-four.sock`). Each call to `ten-four toggle` connects to the socket and flips the daemon between **idle → recording → transcribing → idle**.
+The daemon listens on a Unix socket (`/tmp/ten-four.sock`). Each call to `ten-four toggle` flips the daemon between **idle → recording → transcribing → idle**.
 
 ---
 
-## 1. Install Build Dependencies
+## 1. System Dependencies
 
 ### Debian / Ubuntu / Raspberry Pi OS
 
@@ -29,8 +28,9 @@ sudo apt update
 sudo apt install -y \
   build-essential cmake libclang-dev \
   libasound2-dev \
+  pipewire-pulse pulseaudio-utils \
   ydotool \
-  pkg-config curl git
+  pkg-config curl git wget unzip
 ```
 
 ### Fedora
@@ -38,9 +38,9 @@ sudo apt install -y \
 ```bash
 sudo dnf install -y \
   gcc cmake clang-devel \
-  alsa-lib-devel \
+  alsa-lib-devel pipewire-pulseaudio \
   ydotool \
-  pkg-config curl git
+  pkg-config curl git wget unzip
 ```
 
 ### Arch Linux / Manjaro
@@ -48,26 +48,14 @@ sudo dnf install -y \
 ```bash
 sudo pacman -S \
   base-devel cmake clang \
-  alsa-lib \
+  alsa-lib pipewire-pulse \
   ydotool \
-  pkg-config curl git
-```
-
-### openSUSE
-
-```bash
-sudo zypper install -y \
-  gcc cmake clang-devel \
-  alsa-devel \
-  ydotool \
-  pkg-config curl git
+  pkg-config curl git wget unzip
 ```
 
 ---
 
 ## 2. Install Rust
-
-If you don't have Rust installed:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -76,7 +64,31 @@ source "$HOME/.cargo/env"
 
 ---
 
-## 3. Build ten-four
+## 3. Install libvosk (required for Vosk engine)
+
+The Vosk engine requires the native `libvosk` shared library. Download the prebuilt binary for your architecture:
+
+**aarch64 (Raspberry Pi)**
+```bash
+wget https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-aarch64-0.3.45.zip
+unzip vosk-linux-aarch64-0.3.45.zip
+sudo cp vosk-linux-aarch64-0.3.45/libvosk.so /usr/local/lib/
+sudo ldconfig
+```
+
+**x86_64**
+```bash
+wget https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-x86_64-0.3.45.zip
+unzip vosk-linux-x86_64-0.3.45.zip
+sudo cp vosk-linux-x86_64-0.3.45/libvosk.so /usr/local/lib/
+sudo ldconfig
+```
+
+> If you only plan to use the Whisper engine, you can skip this step — the build will still succeed.
+
+---
+
+## 4. Build ten-four
 
 ```bash
 git clone https://github.com/yourname/ten-four.git
@@ -84,7 +96,7 @@ cd ten-four
 cargo build --release
 ```
 
-The binary will be at `./target/release/ten-four`. Optionally install it:
+Binary will be at `./target/release/ten-four`. Optionally install it system-wide:
 
 ```bash
 sudo cp target/release/ten-four /usr/local/bin/ten-four
@@ -92,201 +104,184 @@ sudo cp target/release/ten-four /usr/local/bin/ten-four
 
 ---
 
-## 4. Download a Whisper Model
+## 5. Download a Model
 
-ten-four resolves the model in this order:
+### Whisper models (default engine)
 
-1. `--model /path/to/model.bin` flag (explicit, highest priority)
-2. `TEN_FOUR_MODEL=/path/to/model.bin` environment variable
-3. Auto-detect: any `.bin` file found in `~/.local/share/ten-four/models/`
-4. Error with instructions if nothing is found
-
-For most users, dropping a model into the default directory is the easiest setup:
+Auto-detection picks the **smallest** `.bin` file in `~/.local/share/ten-four/models/`.
 
 ```bash
 mkdir -p ~/.local/share/ten-four/models
 cd ~/.local/share/ten-four/models
 
-# Recommended: base model — good balance of speed and accuracy
-wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+# Recommended for low-power devices (Pi): tiny English-only model
+wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin
 
-# Or pick another size:
-wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
-wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+# Or the multilingual base model (larger, slower, more accurate)
+wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
 ```
 
-| Model | Size  | Speed (CPU) | Accuracy           |
-|-------|-------|-------------|--------------------|
-| tiny  | 75MB  | ~1s         | Good               |
-| base  | 142MB | ~2s         | Better             |
-| small | 466MB | ~4s         | Best for dictation |
+| Model       | Size  | Notes                              |
+|-------------|-------|------------------------------------|
+| tiny.en     | 75MB  | Fastest, English-only, good for Pi |
+| base        | 142MB | Multilingual, slower on Pi         |
+| small       | 466MB | Best accuracy, very slow on Pi     |
 
-If you prefer to store the model elsewhere, pass it explicitly:
+### Vosk models
 
 ```bash
-ten-four daemon --model /path/to/your/model.bin
-# or
-TEN_FOUR_MODEL=/path/to/your/model.bin ten-four daemon
+mkdir -p ~/.local/share/ten-four/vosk-models
+cd ~/.local/share/ten-four/vosk-models
+
+# Small English model (~40MB, fast)
+wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+unzip vosk-model-small-en-us-0.15.zip
 ```
+
+More models at: https://alphacephei.com/vosk/models
 
 ---
 
-## 5. Set Up ydotoold (Wayland)
+## 6. Set Up ydotoold (Wayland)
 
-`ydotool` requires a background daemon (`ydotoold`) to inject keystrokes.
+`ydotool` requires a background daemon to inject keystrokes:
 
 ```bash
-# Add yourself to the input group (required once, then log out/in)
+# Add yourself to the input group (once, then log out/in)
 sudo usermod -aG input $USER
 
 # Enable the ydotool systemd user service
 systemctl --user enable --now ydotool
 ```
 
-> **Note:** If `systemctl --user enable ydotool` fails, your distro may not ship a unit file. Run it manually: `ydotoold &`
+> If the service isn't available on your distro, run it manually: `ydotoold &`
 
 ### X11 users
 
-Use `xdotool` instead — no daemon needed:
-
 ```bash
-# Debian/Ubuntu
-sudo apt install xdotool
-
-# Fedora
-sudo dnf install xdotool
-
-# Arch
-sudo pacman -S xdotool
+sudo apt install xdotool   # or dnf/pacman equivalent
 ```
 
-Pass `--injector xdotool` when starting the daemon (see step 6).
-
----
-
-## 6. Install as a systemd User Service
-
-Generate and install the service file:
-
-```bash
-ten-four install-service > ~/.config/systemd/user/ten-four.service
-
-# Review it (optional)
-cat ~/.config/systemd/user/ten-four.service
-
-# Enable and start
-systemctl --user daemon-reload
-systemctl --user enable --now ten-four
-
-# Check it's running
-systemctl --user status ten-four
-```
-
-The generated service relies on auto-detection — it will pick up any `.bin` file in `~/.local/share/ten-four/models/`.  
-To pin a specific model, add `Environment=TEN_FOUR_MODEL=/path/to/model.bin` to the service file. To use xdotool, append `--injector xdotool` to the `ExecStart` line.
+Pass `--injector xdotool` when starting the daemon.
 
 ---
 
 ## 7. Bind the Hotkey
 
-Bind `ten-four toggle` to a key in your desktop environment:
+Bind `ten-four toggle` to a key in your desktop environment.
+
+### labwc (`~/.config/labwc/rc.xml`)
+
+```xml
+<keyboard>
+  <keybind key="C-grave">
+    <action name="Execute">
+      <command>/usr/local/bin/ten-four toggle</command>
+    </action>
+  </keybind>
+</keyboard>
+```
+
+Apply with: `labwc --reconfigure`
 
 ### GNOME
-Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts → `+`
-- **Name:** Ten Four
+
+Settings → Keyboard → Custom Shortcuts → `+`
 - **Command:** `ten-four toggle`
-- **Shortcut:** e.g. `Super+Space`
+- **Shortcut:** your key combo
 
 ### KDE Plasma
-System Settings → Shortcuts → Custom Shortcuts → Edit → New → Global Shortcut → Command/URL
+
+System Settings → Shortcuts → Custom Shortcuts → New → Global Shortcut → Command/URL
 - **Command:** `ten-four toggle`
-- **Trigger:** your key combo
 
-### Sway / Hyprland / i3 (config file)
+### Sway / i3
+
 ```
-# Sway / i3
-bindsym $mod+space exec ten-four toggle
-
-# Hyprland
-bind = SUPER, SPACE, exec, ten-four toggle
+bindsym $mod+grave exec ten-four toggle
 ```
 
-### sxhkd (distro-agnostic hotkey daemon)
+### Hyprland
+
 ```
-super + space
-    ten-four toggle
+bind = CTRL, grave, exec, ten-four toggle
 ```
 
 ---
 
-## Usage
-
-Once the daemon is running and the hotkey is bound:
-
-1. Click into any text field (terminal, browser, editor, etc.)
-2. Press your hotkey → you'll see `🎙 Recording...` in the daemon logs
-3. Speak clearly
-4. Press the hotkey again → transcription runs → text is typed at your cursor
-
-Check the daemon status at any time:
+## 8. Run the Daemon
 
 ```bash
-ten-four status
-# → idle | recording | transcribing
+# Whisper engine (default, auto-picks smallest model)
+./target/release/ten-four daemon
+
+# Whisper with explicit device
+./target/release/ten-four daemon --device "My Headset"
+
+# Vosk engine
+./target/release/ten-four daemon --engine vosk \
+  --vosk-model ~/.local/share/ten-four/vosk-models/vosk-model-small-en-us-0.15
+
+# List available microphones
+./target/release/ten-four list-mics
+
+# Test your hotkey without audio (confirms IPC is working)
+./target/release/ten-four test-hotkey
 ```
 
 ---
 
-## Configuration
+## Configuration Reference
 
-| Method | Description |
-|--------|-------------|
-| `--model PATH` | Explicit path to any GGML `.bin` model file |
-| `TEN_FOUR_MODEL=PATH` | Same as `--model`, via environment variable |
-| _(neither set)_ | Auto-detects any `.bin` in `~/.local/share/ten-four/models/` |
-| `--injector ydotool\|xdotool` | Text injection method |
-| `TEN_FOUR_USE_GPU=1` | Enable GPU inference (requires CUDA/Vulkan build) |
+| Flag / Env | Description |
+|---|---|
+| `--engine whisper\|vosk` | Transcription engine (default: `whisper`) |
+| `--model PATH` / `TEN_FOUR_MODEL` | Path to Whisper `.bin` model file |
+| `--vosk-model PATH` / `VOSK_MODEL` | Path to Vosk model directory |
+| `--device NAME` / `DEVICE` | Microphone source name (from `list-mics`) |
+| `--injector ydotool\|xdotool` | Text injection method (default: `ydotool`) |
+| `--socket PATH` | Unix socket path (default: `/tmp/ten-four.sock`) |
+| `TEN_FOUR_USE_GPU=1` | Enable GPU inference for Whisper (requires CUDA/Vulkan build) |
 | `RUST_LOG=ten_four=debug` | Verbose logging |
+
+---
+
+## Commands
+
+```
+ten-four daemon        Start the daemon (run in a terminal or as a service)
+ten-four toggle        Toggle recording (bind to a hotkey)
+ten-four status        Print current state: idle / recording / transcribing
+ten-four test-hotkey   Test hotkey IPC without audio
+ten-four list-mics     List available microphone input devices
+ten-four install-service  Print an example systemd user service file
+```
 
 ---
 
 ## Troubleshooting
 
 ### "No input audio device found"
-Your microphone isn't detected. Check:
 ```bash
-arecord -l          # list capture devices
-pactl list sources  # PulseAudio
+ten-four list-mics        # list all sources
+pactl list sources        # raw PipeWire/PulseAudio sources
 ```
 
 ### "Could not connect to ten-four daemon"
-The daemon isn't running. Start it:
-```bash
-systemctl --user start ten-four
-# or manually:
-ten-four daemon
-```
+The daemon isn't running. Start it manually in a terminal first.
 
 ### Text isn't appearing / ydotool errors
 ```bash
-# Check ydotoold is running
 systemctl --user status ydotool
-
-# Check you're in the input group
 groups | grep input
-# If not: sudo usermod -aG input $USER  (then log out and back in)
+# If not in input group: sudo usermod -aG input $USER  (then log out/in)
 ```
 
 ### Slow transcription on Raspberry Pi
-Use the `tiny` model and set `RUST_LOG=ten_four=info` to see timing.  
-The daemon auto-detects CPU count and caps inference threads at 4.
+Use `ggml-tiny.en.bin` (Whisper) or the small Vosk model. Both are designed for low-power devices. The daemon auto-detects the smallest Whisper model in the models directory.
 
-### Wayland: text appears in wrong window
-The 150ms delay in `inject.rs` is intentional — it waits for focus to return to your target window after the hotkey. Increase it if your DE is slower:
-```bash
-# Edit src/inject.rs: change 150 to 300
-# Then: cargo build --release
-```
+### Vosk: "Failed to load model"
+Ensure the path points to the **directory** (not a file inside it), and that `libvosk.so` is installed and `ldconfig` has been run.
 
 ---
 
@@ -295,13 +290,12 @@ The 150ms delay in `inject.rs` is intentional — it waits for focus to return t
 ```
 ten-four/
 ├── src/
-│   ├── main.rs         # CLI entry: daemon | toggle | status | install-service
-│   ├── daemon.rs       # Main loop: state machine + task orchestration
-│   ├── audio.rs        # cpal recording + WAV conversion (→ 16kHz mono)
-│   ├── transcribe.rs   # whisper-rs inference wrapper
+│   ├── main.rs         # CLI: daemon | toggle | status | test-hotkey | list-mics
+│   ├── daemon.rs       # State machine + task orchestration
+│   ├── audio.rs        # cpal / parec recording + WAV conversion (16kHz mono)
+│   ├── transcribe.rs   # TranscribeEngine trait, WhisperTranscriber, VoskTranscriber
 │   ├── inject.rs       # ydotool / xdotool text injection
-│   └── ipc.rs          # Unix socket client + server helpers
-├── models/             # Place .bin model files here (local dev)
+│   └── ipc.rs          # Unix socket client + server
 └── Cargo.toml
 ```
 

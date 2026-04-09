@@ -5,9 +5,16 @@ mod ipc;
 mod transcribe;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+
+#[derive(Clone, ValueEnum)]
+enum Engine {
+    Whisper,
+    Vosk,
+}
 
 #[derive(Parser)]
 #[command(
@@ -24,11 +31,19 @@ struct Cli {
 enum Command {
     /// Start the ten-four daemon (run this in the background / as a systemd service)
     Daemon {
-        /// Path to the whisper.cpp GGML model file
+        /// Transcription engine to use
+        #[arg(long, default_value = "whisper")]
+        engine: Engine,
+
+        /// Path to the Whisper GGML model file (whisper engine)
         #[arg(long, env = "TEN_FOUR_MODEL")]
         model: Option<String>,
 
-        /// Unix socket path (default: /tmp/voicetype.sock)
+        /// Path to the Vosk model directory (vosk engine)
+        #[arg(long, env = "VOSK_MODEL")]
+        vosk_model: Option<String>,
+
+        /// Unix socket path (default: /tmp/ten-four.sock)
         #[arg(long, default_value = ipc::SOCKET_PATH)]
         socket: String,
 
@@ -37,7 +52,7 @@ enum Command {
         injector: String,
 
         /// Microphone source name to use (from `ten-four list-mics`)
-        #[arg(long, env = "TEN_FOUR_DEVICE")]
+        #[arg(long, env = "DEVICE")]
         device: Option<String>,
     },
 
@@ -50,6 +65,13 @@ enum Command {
 
     /// Print the status of the daemon (idle / recording)
     Status {
+        /// Unix socket path (default: /tmp/voicetype.sock)
+        #[arg(long, default_value = ipc::SOCKET_PATH)]
+        socket: String,
+    },
+
+    /// Test hotkey toggle without audio — just logs state changes
+    TestHotkey {
         /// Unix socket path (default: /tmp/voicetype.sock)
         #[arg(long, default_value = ipc::SOCKET_PATH)]
         socket: String,
@@ -72,21 +94,48 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Daemon {
+            engine,
             model,
+            vosk_model,
             socket,
             injector,
             device,
         } => {
-            let model_path = resolve_model_path(model)?;
             let resolved_device = device.map(|d| resolve_device_name(&d)).transpose()?;
             info!("Starting ten-four daemon");
-            info!("Model: {}", model_path);
             info!("Socket: {}", socket);
             info!("Injector: {}", injector);
             if let Some(ref d) = resolved_device {
                 info!("Device: {}", d);
             }
-            daemon::run(model_path, socket, injector, resolved_device).await?;
+
+            let transcriber: Arc<dyn transcribe::TranscribeEngine> = match engine {
+                Engine::Whisper => {
+                    let model_path = resolve_model_path(model)?;
+                    let t = tokio::task::spawn_blocking(move || {
+                        transcribe::WhisperTranscriber::new(&model_path)
+                    })
+                    .await??;
+                    Arc::new(t)
+                }
+                Engine::Vosk => {
+                    let model_path = vosk_model.ok_or_else(|| {
+                        anyhow::anyhow!("--vosk-model <path> is required when using --engine vosk\n\
+                            Download a model from: https://alphacephei.com/vosk/models")
+                    })?;
+                    let t = tokio::task::spawn_blocking(move || {
+                        transcribe::VoskTranscriber::new(&model_path)
+                    })
+                    .await??;
+                    Arc::new(t)
+                }
+            };
+
+            daemon::run(transcriber, socket, injector, resolved_device).await?;
+        }
+
+        Command::TestHotkey { socket } => {
+            daemon::run_test_hotkey(socket).await?;
         }
 
         Command::Toggle { socket } => {
@@ -115,16 +164,28 @@ fn resolve_model_path(model: Option<String>) -> Result<String> {
         return Ok(m);
     }
 
-    // Scan the XDG default models directory for any .bin file
+    // Scan the XDG default models directory and pick the smallest .bin file
     if let Some(models_dir) = dirs::data_dir().map(|d| d.join("ten-four/models")) {
         if let Ok(entries) = std::fs::read_dir(&models_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("bin") {
-                    let path_str = path.to_string_lossy().to_string();
-                    info!("Auto-detected model: {}", path_str);
-                    return Ok(path_str);
-                }
+            let mut models: Vec<(u64, std::path::PathBuf)> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let path = e.path();
+                    if path.extension().and_then(|x| x.to_str()) == Some("bin") {
+                        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(u64::MAX);
+                        Some((size, path))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            models.sort_by_key(|(size, _)| *size);
+
+            if let Some((_, path)) = models.into_iter().next() {
+                let path_str = path.to_string_lossy().to_string();
+                info!("Auto-detected model: {}", path_str);
+                return Ok(path_str);
             }
         }
     }

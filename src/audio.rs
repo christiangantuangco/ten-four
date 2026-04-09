@@ -7,21 +7,31 @@ use tracing::{debug, info, warn};
 pub struct AudioRecorder {
     sample_rate: u32,
     channels: u16,
+    device: Option<String>,
 }
 
 impl AudioRecorder {
-    pub fn new() -> Result<Self> {
-        let (device, config) = find_input_device()?;
-        info!("Using audio device: {}", device.name().unwrap_or_default());
+    pub fn new(device: Option<String>) -> Result<Self> {
+        if device.is_some() {
+            // parec will record at 16kHz mono — no cpal needed
+            return Ok(Self { sample_rate: 16_000, channels: 1, device });
+        }
+        let (dev, config) = find_input_device()?;
+        info!("Using audio device: {}", dev.name().unwrap_or_default());
         Ok(Self {
             sample_rate: config.sample_rate().0,
             channels: config.channels(),
+            device: None,
         })
     }
 
     /// Record audio until `stop_signal` is set to true.
     /// Returns raw f32 PCM samples.
     pub fn record_until_stop(&self, stop_signal: Arc<Mutex<bool>>) -> Result<Vec<f32>> {
+        if let Some(ref dev_name) = self.device {
+            return record_parec(dev_name, stop_signal);
+        }
+
         let (device, config) = find_input_device()?;
         debug!("Input config: {:?}", config);
 
@@ -100,6 +110,65 @@ impl AudioRecorder {
     pub fn channels(&self) -> u16 {
         self.channels
     }
+}
+
+/// Record from a PipeWire/PulseAudio source via `parec`.
+/// Captures float32le at 16kHz mono — no resampling needed downstream.
+fn record_parec(device: &str, stop_signal: Arc<Mutex<bool>>) -> Result<Vec<f32>> {
+    use std::io::Read;
+
+    let mut child = std::process::Command::new("parec")
+        .args([
+            &format!("--device={}", device),
+            "--format=float32le",
+            "--rate=16000",
+            "--channels=1",
+            "--raw",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("Failed to spawn parec. Is PipeWire/PulseAudio running?")?;
+
+    info!("Recording via PipeWire (parec) from {}", device);
+
+    let samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
+    let samples_clone = Arc::clone(&samples);
+    let mut stdout = child.stdout.take().context("Failed to get parec stdout")?;
+
+    // Reader thread: converts raw float32le bytes → f32 samples
+    let reader = std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match stdout.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let floats: Vec<f32> = buf[..n]
+                        .chunks_exact(4)
+                        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                        .collect();
+                    samples_clone.lock().unwrap().extend_from_slice(&floats);
+                }
+            }
+        }
+    });
+
+    loop {
+        std::thread::sleep(Duration::from_millis(50));
+        if *stop_signal.lock().unwrap() {
+            break;
+        }
+    }
+
+    // Kill parec — causes EOF on stdout, ending the reader thread
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = reader.join();
+
+    let recorded = samples.lock().unwrap().clone();
+    info!("Captured {} samples ({:.1}s)", recorded.len(), recorded.len() as f32 / 16_000.0);
+
+    Ok(recorded)
 }
 
 /// Find a usable input device + config.

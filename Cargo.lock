@@ -1233,6 +1233,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "ten-four"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cpal",
+ "ctrlc",
+ "dirs",
+ "hound",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "vosk",
+ "whisper-rs",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1405,24 +1426,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
-name = "voicetype"
-version = "0.1.0"
+name = "vosk"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae9e2a552b3fb49f097849cfed3d4a2a7163bb7ea507268666980605a676c627"
 dependencies = [
- "anyhow",
- "clap",
- "cpal",
- "ctrlc",
- "dirs",
- "hound",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "whisper-rs",
+ "vosk-sys",
 ]
+
+[[package]]
+name = "vosk-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ab2937e19c7d32c1a077a4a220011cbbb2b6ab83bb35635ffb65a82b7e43f6"
 
 [[package]]
 name = "walkdir"
