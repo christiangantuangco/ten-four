@@ -99,30 +99,30 @@ fn resolve_model_path(model: Option<String>) -> Result<String> {
         return Ok(m);
     }
 
-    // Check default locations
-    let candidates = vec![
-        // Project-local models dir
-        "./models/ggml-small.bin".to_string(),
-        "./models/ggml-tiny.bin".to_string(),
-        // XDG data dir
-        dirs::data_dir()
-            .map(|d| d.join("ten-four/models/ggml-small.bin").to_string_lossy().to_string())
-            .unwrap_or_default(),
-        dirs::data_dir()
-            .map(|d| d.join("ten-four/models/ggml-tiny.bin").to_string_lossy().to_string())
-            .unwrap_or_default(),
-    ];
-
-    for path in &candidates {
-        if !path.is_empty() && std::path::Path::new(path).exists() {
-            return Ok(path.clone());
+    // Scan the XDG default models directory for any .bin file
+    if let Some(models_dir) = dirs::data_dir().map(|d| d.join("ten-four/models")) {
+        if let Ok(entries) = std::fs::read_dir(&models_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("bin") {
+                    let path_str = path.to_string_lossy().to_string();
+                    info!("Auto-detected model: {}", path_str);
+                    return Ok(path_str);
+                }
+            }
         }
     }
 
     anyhow::bail!(
-        "No model file found. Download a model and pass it with --model, \
-        set TEN_FOUR_MODEL env var, or place it at ./models/ggml-small.bin\n\n\
-        Download: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+        "No model file found.\n\n\
+        Options:\n  \
+        1. Pass it directly:       ten-four daemon --model /path/to/model.bin\n  \
+        2. Set an env var:         TEN_FOUR_MODEL=/path/to/model.bin ten-four daemon\n  \
+        3. Drop it in the default dir: ~/.local/share/ten-four/models/<any>.bin\n\n\
+        Download a model:\n  \
+        mkdir -p ~/.local/share/ten-four/models\n  \
+        wget -O ~/.local/share/ten-four/models/ggml-base.bin \\\n    \
+        https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
     )
 }
 
@@ -142,7 +142,8 @@ Type=simple
 ExecStart={exe} daemon
 Restart=on-failure
 RestartSec=3
-Environment=TEN_FOUR_MODEL=%h/.local/share/ten-four/models/ggml-small.bin
+# Optional: set TEN_FOUR_MODEL=/path/to/model.bin to pin a specific model.
+# Otherwise, ten-four will auto-detect any .bin in ~/.local/share/ten-four/models/
 Environment=RUST_LOG=ten_four=info
 
 [Install]

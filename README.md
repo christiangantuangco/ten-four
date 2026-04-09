@@ -94,24 +94,40 @@ sudo cp target/release/ten-four /usr/local/bin/ten-four
 
 ## 4. Download a Whisper Model
 
-Models live in `~/.local/share/ten-four/models/` (or pass `--model` manually).
+ten-four resolves the model in this order:
+
+1. `--model /path/to/model.bin` flag (explicit, highest priority)
+2. `TEN_FOUR_MODEL=/path/to/model.bin` environment variable
+3. Auto-detect: any `.bin` file found in `~/.local/share/ten-four/models/`
+4. Error with instructions if nothing is found
+
+For most users, dropping a model into the default directory is the easiest setup:
 
 ```bash
 mkdir -p ~/.local/share/ten-four/models
 cd ~/.local/share/ten-four/models
 
-# Recommended: small model — good accuracy, reasonable speed on CPU
-wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+# Recommended: base model — good balance of speed and accuracy
+wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
 
-# Or: tiny model — fastest, lower accuracy (good for Raspberry Pi / weak CPU)
+# Or pick another size:
 wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 ```
 
-| Model | Size | Speed (CPU) | Accuracy |
-|-------|------|-------------|----------|
-| tiny  | 75MB | ~1s         | Good     |
-| base  | 142MB| ~2s         | Better   |
-| small | 466MB| ~4s         | Best for dictation |
+| Model | Size  | Speed (CPU) | Accuracy           |
+|-------|-------|-------------|--------------------|
+| tiny  | 75MB  | ~1s         | Good               |
+| base  | 142MB | ~2s         | Better             |
+| small | 466MB | ~4s         | Best for dictation |
+
+If you prefer to store the model elsewhere, pass it explicitly:
+
+```bash
+ten-four daemon --model /path/to/your/model.bin
+# or
+TEN_FOUR_MODEL=/path/to/your/model.bin ten-four daemon
+```
 
 ---
 
@@ -166,8 +182,8 @@ systemctl --user enable --now ten-four
 systemctl --user status ten-four
 ```
 
-The generated service sets `TEN_FOUR_MODEL` to `~/.local/share/ten-four/models/ggml-small.bin`.  
-Edit the service file if you want a different model or the `--injector xdotool` flag.
+The generated service relies on auto-detection — it will pick up any `.bin` file in `~/.local/share/ten-four/models/`.  
+To pin a specific model, add `Environment=TEN_FOUR_MODEL=/path/to/model.bin` to the service file. To use xdotool, append `--injector xdotool` to the `ExecStart` line.
 
 ---
 
@@ -225,8 +241,9 @@ ten-four status
 
 | Method | Description |
 |--------|-------------|
-| `--model PATH` | Path to GGML model file |
-| `TEN_FOUR_MODEL` env var | Same as `--model` |
+| `--model PATH` | Explicit path to any GGML `.bin` model file |
+| `TEN_FOUR_MODEL=PATH` | Same as `--model`, via environment variable |
+| _(neither set)_ | Auto-detects any `.bin` in `~/.local/share/ten-four/models/` |
 | `--injector ydotool\|xdotool` | Text injection method |
 | `TEN_FOUR_USE_GPU=1` | Enable GPU inference (requires CUDA/Vulkan build) |
 | `RUST_LOG=ten_four=debug` | Verbose logging |
