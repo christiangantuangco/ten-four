@@ -53,6 +53,9 @@ enum Command {
 
     /// Print an example systemd user service file to stdout
     InstallService,
+
+    /// List available microphone input devices (ALSA + PulseAudio/PipeWire)
+    ListMics,
 }
 
 #[tokio::main]
@@ -89,6 +92,10 @@ async fn main() -> Result<()> {
         Command::InstallService => {
             print_service_file();
         }
+
+        Command::ListMics => {
+            list_mics();
+        }
     }
 
     Ok(())
@@ -124,6 +131,62 @@ fn resolve_model_path(model: Option<String>) -> Result<String> {
         wget -O ~/.local/share/ten-four/models/ggml-base.bin \\\n    \
         https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
     )
+}
+
+fn list_mics() {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    println!("ALSA input devices:");
+    let host = cpal::default_host();
+    let default_name = host
+        .default_input_device()
+        .and_then(|d| d.name().ok())
+        .unwrap_or_default();
+
+    match host.input_devices() {
+        Ok(devices) => {
+            let mut found = false;
+            for device in devices {
+                let name = device.name().unwrap_or_else(|_| "<unknown>".to_string());
+                let marker = if name == default_name { " (default)" } else { "" };
+                println!("  {}{}", name, marker);
+                found = true;
+            }
+            if !found {
+                println!("  (none found)");
+            }
+        }
+        Err(e) => println!("  Failed to enumerate ALSA devices: {}", e),
+    }
+
+    println!();
+    println!("PulseAudio / PipeWire sources (includes Bluetooth):");
+    match std::process::Command::new("pactl").args(["list", "short", "sources"]).output() {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let sources: Vec<&str> = text
+                .lines()
+                .filter(|l| !l.contains(".monitor")) // skip monitor (loopback) sources
+                .collect();
+            if sources.is_empty() {
+                println!("  (none found)");
+            } else {
+                for line in sources {
+                    // pactl short format: <id> <name> <module> <format> <state>
+                    let name = line.split_whitespace().nth(1).unwrap_or(line);
+                    println!("  {}", name);
+                }
+            }
+        }
+        Ok(_) => println!("  pactl returned an error — is PulseAudio/PipeWire running?"),
+        Err(_) => println!("  pactl not found — install pulseaudio-utils or pipewire-pulse"),
+    }
+
+    println!();
+    println!("To use a specific device, set it as system default:");
+    println!("  pactl set-default-source <source-name>");
+    println!("Or pass it directly when starting the daemon:");
+    println!("  ten-four daemon --device <name>");
 }
 
 fn print_service_file() {
