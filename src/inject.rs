@@ -101,16 +101,31 @@ impl Injector {
 }
 
 fn check_ydotool_daemon() -> Result<()> {
-    // ydotool looks for /tmp/.ydotool_socket or the YDOTOOL_SOCKET env var
-    let socket_path = std::env::var("YDOTOOL_SOCKET")
-        .unwrap_or_else(|_| "/tmp/.ydotool_socket".to_string());
+    let socket_path = ydotool_socket_path();
 
     if !std::path::Path::new(&socket_path).exists() {
         warn!("ydotoold socket not found at {}. The ydotool daemon may not be running.", socket_path);
         warn!("Start it with: systemctl --user enable --now ydotool");
-        // Don't hard-fail here — some setups use a different socket path
-        // The actual type command will fail with a clear error if it can't connect
+        // Don't hard-fail — the type command will error clearly if it can't connect
     }
 
     Ok(())
+}
+
+fn ydotool_socket_path() -> String {
+    // Explicit env var takes highest priority
+    if let Ok(path) = std::env::var("YDOTOOL_SOCKET") {
+        return path;
+    }
+
+    // systemd sets XDG_RUNTIME_DIR to /run/user/<uid> — ydotoold uses this by default
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+        let path = format!("{}/.ydotool_socket", runtime_dir);
+        if std::path::Path::new(&path).exists() {
+            return path;
+        }
+    }
+
+    // Legacy fallback
+    "/tmp/.ydotool_socket".to_string()
 }
