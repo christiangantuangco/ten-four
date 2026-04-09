@@ -25,10 +25,22 @@ impl State {
     }
 }
 
-pub async fn run(model_path: String, socket_path: String, injector_name: String) -> Result<()> {
+pub async fn run(model_path: String, socket_path: String, injector_name: String, device: Option<String>) -> Result<()> {
     // Check injector is available before we start
     let injector = Injector::from_str(&injector_name);
     injector.check_available()?;
+
+    // Pin the PipeWire/PulseAudio source if a device was specified
+    if let Some(ref dev) = device {
+        let status = std::process::Command::new("pactl")
+            .args(["set-default-source", dev])
+            .status();
+        match status {
+            Ok(s) if s.success() => info!("Default source set to: {}", dev),
+            Ok(_) => anyhow::bail!("pactl failed to set source '{}'. Run `ten-four list-mics` to see valid names.", dev),
+            Err(_) => anyhow::bail!("pactl not found — install pulseaudio-utils or pipewire-pulse to use --device"),
+        }
+    }
 
     // Load the Whisper model (blocking — happens once at startup)
     let transcriber = task::spawn_blocking(move || Transcriber::new(&model_path))

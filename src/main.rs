@@ -35,6 +35,10 @@ enum Command {
         /// Injection method: ydotool or xdotool
         #[arg(long, default_value = "ydotool")]
         injector: String,
+
+        /// Microphone source name to use (from `ten-four list-mics`)
+        #[arg(long, env = "TEN_FOUR_DEVICE")]
+        device: Option<String>,
     },
 
     /// Toggle recording on/off (bind this to a hotkey in your DE)
@@ -71,13 +75,18 @@ async fn main() -> Result<()> {
             model,
             socket,
             injector,
+            device,
         } => {
             let model_path = resolve_model_path(model)?;
+            let resolved_device = device.map(|d| resolve_device_name(&d)).transpose()?;
             info!("Starting ten-four daemon");
             info!("Model: {}", model_path);
             info!("Socket: {}", socket);
             info!("Injector: {}", injector);
-            daemon::run(model_path, socket, injector).await?;
+            if let Some(ref d) = resolved_device {
+                info!("Device: {}", d);
+            }
+            daemon::run(model_path, socket, injector, resolved_device).await?;
         }
 
         Command::Toggle { socket } => {
@@ -178,10 +187,32 @@ fn list_mics() {
     }
 
     println!();
-    println!("To use a specific device, set it as system default:");
-    println!("  pactl set-default-source <source-name>");
-    println!("Or pass it directly when starting the daemon:");
-    println!("  ten-four daemon --device <name>");
+    println!("To use a specific device, pass the source name to the daemon:");
+    println!("  ten-four daemon --device <source-name>");
+    println!("  TEN_FOUR_DEVICE=<source-name> ten-four daemon");
+}
+
+/// Resolve a device string (friendly name or source name) to the actual pactl source name.
+fn resolve_device_name(input: &str) -> Result<String> {
+    let output = std::process::Command::new("pactl")
+        .args(["list", "sources"])
+        .output()
+        .map_err(|_| anyhow::anyhow!("pactl not found — install pulseaudio-utils or pipewire-pulse"))?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let sources = parse_pactl_sources(&text);
+
+    // Match against source name (exact) or description (case-insensitive substring)
+    for (name, description) in &sources {
+        if name == input || description.to_lowercase().contains(&input.to_lowercase()) {
+            return Ok(name.clone());
+        }
+    }
+
+    anyhow::bail!(
+        "Device '{}' not found. Run `ten-four list-mics` to see available devices.",
+        input
+    )
 }
 
 /// Parse `pactl list sources` output into (name, description) pairs.
