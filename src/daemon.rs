@@ -93,7 +93,7 @@ pub async fn run(model_path: String, socket_path: String, injector_name: String)
 
                 task::spawn(async move {
                     if let Err(e) = record_and_transcribe(
-                        state_for_task,
+                        Arc::clone(&state_for_task),
                         stop_for_task,
                         transcriber_for_task,
                         injector_for_task,
@@ -101,6 +101,7 @@ pub async fn run(model_path: String, socket_path: String, injector_name: String)
                     .await
                     {
                         error!("Error during record/transcribe: {:#}", e);
+                        *state_for_task.lock().unwrap() = State::Idle;
                     }
                 });
             }

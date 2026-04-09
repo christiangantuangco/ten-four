@@ -11,17 +11,8 @@ pub struct AudioRecorder {
 
 impl AudioRecorder {
     pub fn new() -> Result<Self> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .context("No input audio device found. Check your microphone is connected.")?;
-
+        let (device, config) = find_input_device()?;
         info!("Using audio device: {}", device.name().unwrap_or_default());
-
-        let config = device
-            .default_input_config()
-            .context("Failed to get default input config")?;
-
         Ok(Self {
             sample_rate: config.sample_rate().0,
             channels: config.channels(),
@@ -31,12 +22,7 @@ impl AudioRecorder {
     /// Record audio until `stop_signal` is set to true.
     /// Returns raw f32 PCM samples.
     pub fn record_until_stop(&self, stop_signal: Arc<Mutex<bool>>) -> Result<Vec<f32>> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .context("No input audio device found")?;
-
-        let config = device.default_input_config()?;
+        let (device, config) = find_input_device()?;
         debug!("Input config: {:?}", config);
 
         let samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
@@ -114,6 +100,34 @@ impl AudioRecorder {
     pub fn channels(&self) -> u16 {
         self.channels
     }
+}
+
+/// Find a usable input device + config.
+/// Tries the system default first; if its config is invalid, falls back to
+/// enumerating all input devices and picking the first one that works.
+fn find_input_device() -> Result<(cpal::Device, cpal::SupportedStreamConfig)> {
+    let host = cpal::default_host();
+
+    if let Some(device) = host.default_input_device() {
+        if let Ok(config) = device.default_input_config() {
+            return Ok((device, config));
+        }
+        warn!(
+            "Default input device '{}' has no usable config, scanning all devices...",
+            device.name().unwrap_or_default()
+        );
+    }
+
+    for device in host.input_devices().context("Failed to enumerate input devices")? {
+        if let Ok(config) = device.default_input_config() {
+            return Ok((device, config));
+        }
+    }
+
+    anyhow::bail!(
+        "No usable audio input device found. Check your microphone is connected.\n\
+        List devices with: arecord -l"
+    )
 }
 
 /// Downsample and convert stereo → mono f32 PCM to a WAV file at 16kHz (required by Whisper).
