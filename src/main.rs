@@ -161,20 +161,15 @@ fn list_mics() {
 
     println!();
     println!("PulseAudio / PipeWire sources (includes Bluetooth):");
-    match std::process::Command::new("pactl").args(["list", "short", "sources"]).output() {
+    match std::process::Command::new("pactl").args(["list", "sources"]).output() {
         Ok(out) if out.status.success() => {
             let text = String::from_utf8_lossy(&out.stdout);
-            let sources: Vec<&str> = text
-                .lines()
-                .filter(|l| !l.contains(".monitor")) // skip monitor (loopback) sources
-                .collect();
+            let sources = parse_pactl_sources(&text);
             if sources.is_empty() {
                 println!("  (none found)");
             } else {
-                for line in sources {
-                    // pactl short format: <id> <name> <module> <format> <state>
-                    let name = line.split_whitespace().nth(1).unwrap_or(line);
-                    println!("  {}", name);
+                for (name, description) in &sources {
+                    println!("  {:<55} {}", name, description);
                 }
             }
         }
@@ -187,6 +182,38 @@ fn list_mics() {
     println!("  pactl set-default-source <source-name>");
     println!("Or pass it directly when starting the daemon:");
     println!("  ten-four daemon --device <name>");
+}
+
+/// Parse `pactl list sources` output into (name, description) pairs.
+/// Skips monitor (loopback) sources.
+fn parse_pactl_sources(text: &str) -> Vec<(String, String)> {
+    let mut sources = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current_desc: Option<String> = None;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(name) = trimmed.strip_prefix("Name: ") {
+            // Save previous source if complete
+            if let (Some(n), Some(d)) = (current_name.take(), current_desc.take()) {
+                if !n.contains(".monitor") {
+                    sources.push((n, d));
+                }
+            }
+            current_name = Some(name.to_string());
+            current_desc = None;
+        } else if let Some(desc) = trimmed.strip_prefix("Description: ") {
+            current_desc = Some(desc.to_string());
+        }
+    }
+    // Flush last entry
+    if let (Some(n), Some(d)) = (current_name, current_desc) {
+        if !n.contains(".monitor") {
+            sources.push((n, d));
+        }
+    }
+
+    sources
 }
 
 fn print_service_file() {
