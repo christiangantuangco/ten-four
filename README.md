@@ -33,6 +33,8 @@ sudo apt install -y \
   pkg-config curl git wget unzip
 ```
 
+> `pulseaudio-utils` includes both `pactl` (device selection) and `parec` (used internally when `--device` is set).
+
 ### Fedora
 
 ```bash
@@ -84,14 +86,14 @@ sudo cp vosk-linux-x86_64-0.3.45/libvosk.so /usr/local/lib/
 sudo ldconfig
 ```
 
-> If you only plan to use the Whisper engine, you can skip this step — the build will still succeed.
+> `libvosk` is required at **build time** — the linker will fail without it. If you only want the Whisper engine, the easiest fix is to install libvosk anyway (it's just a `.so` file), or use feature flags if added in the future.
 
 ---
 
 ## 4. Build ten-four
 
 ```bash
-git clone https://github.com/yourname/ten-four.git
+git clone https://github.com/christiangantuangco/ten-four.git
 cd ten-four
 cargo build --release
 ```
@@ -173,13 +175,16 @@ Bind `ten-four toggle` to a key in your desktop environment.
 ### labwc (`~/.config/labwc/rc.xml`)
 
 ```xml
-<keyboard>
-  <keybind key="C-grave">
-    <action name="Execute">
-      <command>/usr/local/bin/ten-four toggle</command>
-    </action>
-  </keybind>
-</keyboard>
+<?xml version="1.0"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <keyboard>
+    <keybind key="C-grave">
+      <action name="Execute">
+        <command>/usr/local/bin/ten-four toggle</command>
+      </action>
+    </keybind>
+  </keyboard>
+</openbox_config>
 ```
 
 Apply with: `labwc --reconfigure`
